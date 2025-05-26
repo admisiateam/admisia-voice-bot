@@ -1,27 +1,51 @@
 const express = require('express');
+const { urlencoded } = require('body-parser');
 const axios = require('axios');
+require('dotenv').config();
+
 const app = express();
 const port = process.env.PORT || 3000;
 
-require('dotenv').config();
+app.use(urlencoded({ extended: false }));
 
-app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
+app.post('/voice', (req, res) => {
+  const twiml = `
+    <Response>
+      <Play>/intro.mp3</Play>
+      <Pause length="1"/>
+      <Gather input="speech dtmf" timeout="10" numDigits="1" action="/handle-speech" method="POST">
+        <Say language="es-ES" voice="woman">Pulsa cualquier número o di algo para continuar.</Say>
+      </Gather>
+      <Say language="es-ES" voice="woman">Lo siento, no recibí respuesta. ¡Hasta luego!</Say>
+    </Response>
+  `;
+  res.type('text/xml');
+  res.send(twiml);
+});
 
-app.post('/voice', async (req, res) => {
-  const prompt = 'Hola, estás hablando con Laura, asesora virtual de la Universidad Francisco de Vitoria. ¿En qué puedo ayudarte hoy?';
+app.post('/handle-speech', async (req, res) => {
+  const userSpeech = req.body.SpeechResult || 'No entendí';
+  const openaiApiKey = process.env.OPENAI_API_KEY;
+  const elevenApiKey = process.env.ELEVENLABS_API_KEY;
+  const voiceId = 'UOIqAnmS11Reiei1Ytkc'; // Laura
 
   try {
     const completion = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-4',
-        messages: [{ role: 'user', content: prompt }],
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'Eres Laura, asesora académica de la Universidad Francisco de Vitoria. Ayuda a los estudiantes a resolver dudas sobre grados, másteres, becas y admisiones.',
+          },
+          { role: 'user', content: userSpeech },
+        ],
       },
       {
         headers: {
+          Authorization: `Bearer ${openaiApiKey}`,
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         },
       }
     );
@@ -29,37 +53,46 @@ app.post('/voice', async (req, res) => {
     const respuesta = completion.data.choices[0].message.content;
 
     const audio = await axios.post(
-      'https://api.elevenlabs.io/v1/text-to-speech/UOIqAnmS11Reiei1Ytkc/stream',
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
       {
         text: respuesta,
+        model_id: 'eleven_monolingual_v1',
         voice_settings: {
           stability: 0.7,
-          similarity_boost: 0.7
-        }
+          similarity_boost: 0.7,
+        },
       },
       {
         headers: {
           'Content-Type': 'application/json',
-          'xi-api-key': process.env.ELEVENLABS_API_KEY
+          'xi-api-key': elevenApiKey,
         },
-        responseType: 'arraybuffer'
+        responseType: 'arraybuffer',
       }
     );
 
-    res.set('Content-Type', 'audio/mpeg');
-    res.send(audio.data);
-  } catch (error) {
-    console.error('Error en /voice:', error.message);
-    res.type('text/xml');
-    res.send(`
+    require('fs').writeFileSync('./public/respuesta.mp3', audio.data);
+
+    const twiml = `
       <Response>
-        <Say language="es-ES" voice="woman">
-          Lo siento, ha ocurrido un error al procesar la llamada. Por favor, inténtalo de nuevo más tarde.
-        </Say>
+        <Play>/respuesta.mp3</Play>
       </Response>
-    `);
+    `;
+    res.type('text/xml');
+    res.send(twiml);
+  } catch (error) {
+    console.error('Error:', error.response?.data || error.message);
+    const twiml = `
+      <Response>
+        <Say language="es-ES" voice="woman">Lo siento, ha ocurrido un error. ¡Hasta luego!</Say>
+      </Response>
+    `;
+    res.type('text/xml');
+    res.send(twiml);
   }
 });
+
+app.use(express.static('public'));
 
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);
