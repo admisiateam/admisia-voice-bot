@@ -1,13 +1,17 @@
 const express = require('express');
+const bodyParser = require('body-parser');
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(express.urlencoded({ extended: false }));
+app.use(bodyParser.urlencoded({ extended: false }));
 
 app.post('/voice', (req, res) => {
   const twiml = `
     <Response>
-      <Say voice="woman" language="es-ES">Hola. Esta es una llamada de prueba del sistema AdmisIA. Gracias por tu interés.</Say>
+      <Gather input="speech" action="/response" method="POST" language="es-ES" timeout="5">
+        <Say voice="woman" language="es-ES">Hola, soy Laura, asesora académica. ¿En qué puedo ayudarte?</Say>
+      </Gather>
+      <Say voice="woman" language="es-ES">No te he entendido, lo intentamos más tarde. Adiós.</Say>
     </Response>
   `;
   res.type('text/xml');
