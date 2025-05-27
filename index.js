@@ -10,52 +10,23 @@ const port = process.env.PORT || 3000;
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static('public'));
 
-const voiceId = 'UOIqAnmS11Reiei1Ytkc'; // Laura
-
-// Ruta de inicio: genera saludo y escucha al usuario
-app.post('/voice', async (req, res) => {
-  const saludo = 'Hola, soy Laura, asesora académica de la Universidad Francisco de Vitoria. ¿En qué puedo ayudarte?';
-
-  try {
-    const bienvenidaAudio = await axios.post(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
-      {
-        text: saludo,
-        voice_settings: {
-          stability: 0.7,
-          similarity_boost: 0.7,
-        },
-      },
-      {
-        headers: {
-          'xi-api-key': process.env.ELEVENLABS_API_KEY,
-          'Content-Type': 'application/json',
-        },
-        responseType: 'arraybuffer',
-      }
-    );
-
-    fs.writeFileSync(path.join(__dirname, 'public', 'respuesta.mp3'), bienvenidaAudio.data);
-
-    const twiml = `
-      <Response>
-        <Play>/respuesta.mp3</Play>
-        <Gather input="speech" action="/respuesta" method="POST" language="es-ES" timeout="10" />
-        <Say language="es-ES">No he escuchado nada. Hasta luego.</Say>
-      </Response>
-    `;
-    res.type('text/xml');
-    res.send(twiml);
-  } catch (err) {
-    console.error('Error en /voice:', err.message);
-    res.type('text/xml');
-    res.send('<Response><Say>Ha ocurrido un error. Adiós.</Say></Response>');
-  }
+app.post('/voice', (req, res) => {
+  const twiml = `
+    <Response>
+      <Play>https://${req.headers.host}/Intro.mp3</Play>
+      <Gather input="speech" action="/response" method="POST" language="es-ES" timeout="5">
+        <Say voice="woman" language="es-ES">Hola. ¿En qué puedo ayudarte?</Say>
+      </Gather>
+      <Say voice="woman" language="es-ES">No te he entendido, por favor intenta de nuevo.</Say>
+      <Redirect>/voice</Redirect>
+    </Response>
+  `;
+  res.type('text/xml');
+  res.send(twiml);
 });
 
-// Ruta para procesar la respuesta del usuario
-app.post('/respuesta', async (req, res) => {
-  const userInput = req.body.SpeechResult || 'No entendí';
+app.post('/response', async (req, res) => {
+  const userInput = req.body.SpeechResult || 'No se ha recibido nada';
 
   try {
     const completion = await axios.post(
@@ -65,8 +36,7 @@ app.post('/respuesta', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content:
-              'Eres Laura, asesora académica de la Universidad Francisco de Vitoria. Tu voz debe sonar cálida, cercana y profesional. No repitas frases como "Estoy aquí para ayudarte" o "¿En qué puedo ayudarte?". Responde de forma directa, útil y coherente, como una persona real. Evita sonar como un asistente artificial.',
+            content: 'Eres Laura, asesora académica de la Universidad Francisco de Vitoria. Responde de forma cercana, útil y profesional a las preguntas sobre grados, salidas profesionales o dudas académicas. No digas que eres una IA. No repitas la misma frase.',
           },
           {
             role: 'user',
@@ -82,43 +52,28 @@ app.post('/respuesta', async (req, res) => {
       }
     );
 
-    const respuestaIA = completion.data.choices[0].message.content;
-
-    const audioIA = await axios.post(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
-      {
-        text: respuestaIA,
-        voice_settings: {
-          stability: 0.7,
-          similarity_boost: 0.7,
-        },
-      },
-      {
-        headers: {
-          'xi-api-key': process.env.ELEVENLABS_API_KEY,
-          'Content-Type': 'application/json',
-        },
-        responseType: 'arraybuffer',
-      }
-    );
-
-    fs.writeFileSync(path.join(__dirname, 'public', 'respuesta.mp3'), audioIA.data);
+    const reply = completion.data.choices[0].message.content;
 
     const twiml = `
       <Response>
-        <Play>/respuesta.mp3</Play>
+        <Say voice="woman" language="es-ES">${reply}</Say>
         <Redirect>/voice</Redirect>
       </Response>
     `;
     res.type('text/xml');
     res.send(twiml);
-  } catch (err) {
-    console.error('Error en /respuesta:', err.message);
+  } catch (error) {
+    console.error('Error con OpenAI:', error.message);
+    const twiml = `
+      <Response>
+        <Say voice="woman" language="es-ES">Lo siento, ha ocurrido un error. Intenta llamar más tarde.</Say>
+      </Response>
+    `;
     res.type('text/xml');
-    res.send('<Response><Say>Ha ocurrido un error. Adiós.</Say></Response>');
+    res.send(twiml);
   }
 });
 
 app.listen(port, () => {
-  console.log(`Servidor escuchando en http://localhost:${port}`);
+  console.log(`Servidor activo en http://localhost:${port}`);
 });
