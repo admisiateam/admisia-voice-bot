@@ -10,65 +10,34 @@ const port = process.env.PORT || 3000;
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static('public'));
 
-let chatHistory = [
-  {
-    role: 'system',
-    content:
-      'Eres Laura, asesora académica de la Universidad Francisco de Vitoria. Responde en español de forma natural, cercana y profesional. Evita sonar como un robot. No repitas frases como "Estoy aquí para ayudarte" ni "¿En qué puedo ayudarte?" tras cada respuesta. Mantén la conversación fluida y sin frases vacías.',
-  },
-];
+let chatHistory = []; // Historial de conversación
 
-// Ruta inicial: reproduce audio de bienvenida y escucha
-app.post('/voice', (req, res) => {
-  const twiml = `
-    <Response>
-      <Play>https://web-production-0568c.up.railway.app/respuesta.mp3</Play>
-      <Gather input="speech" action="/respuesta" method="POST" language="es-ES" timeout="10">
-      </Gather>
-      <Say language="es-ES" voice="woman">No he escuchado nada. Hasta luego.</Say>
-    </Response>
-  `;
-  res.type('text/xml');
-  res.send(twiml);
-});
-
-// Ruta que procesa la respuesta del usuario
-app.post('/respuesta', async (req, res) => {
-  const userInput = req.body.SpeechResult || 'No entendí';
+// INICIO DE LLAMADA
+app.post('/voice', async (req, res) => {
+  // Resetear historial en cada llamada
+  chatHistory = [
+    {
+      role: 'system',
+      content:
+        'Eres Laura, asesora académica de la Universidad Francisco de Vitoria. Responde de forma natural, fluida y profesional. Evita frases robóticas como "Estoy aquí para ayudarte" o "¿En qué puedo ayudarte?" tras cada respuesta. Saluda siempre al principio diciendo "Hola, soy Laura, asesora académica de la Universidad Francisco de Vitoria. ¿En qué puedo ayudarte?".',
+    },
+    {
+      role: 'assistant',
+      content:
+        'Hola, soy Laura, asesora académica de la Universidad Francisco de Vitoria. ¿En qué puedo ayudarte?',
+    },
+  ];
 
   const openaiKey = process.env.OPENAI_API_KEY;
   const elevenKey = process.env.ELEVENLABS_API_KEY;
   const voiceId = 'UOIqAnmS11Reiei1Ytkc'; // Laura
 
+  // Generar audio de saludo de bienvenida
   try {
-    // Añadir input del usuario al historial
-    chatHistory.push({ role: 'user', content: userInput });
-
-    // Petición a OpenAI con historial
-    const chat = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-3.5-turbo',
-        messages: chatHistory,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${openaiKey}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    const respuesta = chat.data.choices[0].message.content;
-
-    // Añadir respuesta de la IA al historial
-    chatHistory.push({ role: 'assistant', content: respuesta });
-
-    // Convertir respuesta en voz con ElevenLabs
-    const audio = await axios.post(
+    const bienvenidaAudio = await axios.post(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
       {
-        text: respuesta,
+        text: chatHistory[1].content,
         voice_settings: {
           stability: 0.7,
           similarity_boost: 0.7,
@@ -83,9 +52,72 @@ app.post('/respuesta', async (req, res) => {
       }
     );
 
-    fs.writeFileSync(path.join(__dirname, 'public', 'respuesta.mp3'), audio.data);
+    fs.writeFileSync(path.join(__dirname, 'public', 'respuesta.mp3'), bienvenidaAudio.data);
 
-    // Reproducir y volver a escuchar
+    const twiml = `
+      <Response>
+        <Play>/respuesta.mp3</Play>
+        <Gather input="speech" action="/respuesta" method="POST" language="es-ES" timeout="10" />
+        <Say language="es-ES">No he escuchado nada. Hasta luego.</Say>
+      </Response>
+    `;
+    res.type('text/xml');
+    res.send(twiml);
+  } catch (error) {
+    console.error('Error al generar bienvenida:', error.message);
+    res.type('text/xml');
+    res.send(`<Response><Say>Ha ocurrido un error. Adiós.</Say></Response>`);
+  }
+});
+
+// RESPUESTA A LA VOZ DEL USUARIO
+app.post('/respuesta', async (req, res) => {
+  const userInput = req.body.SpeechResult || 'No entendí';
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const elevenKey = process.env.ELEVENLABS_API_KEY;
+  const voiceId = 'UOIqAnmS11Reiei1Ytkc';
+
+  chatHistory.push({ role: 'user', content: userInput });
+
+  try {
+    // Llamada a GPT-4
+    const completion = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4',
+        messages: chatHistory.slice(-6), // Últimos 6 mensajes (mantiene contexto sin lentitud)
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${openaiKey}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    const respuestaIA = completion.data.choices[0].message.content;
+    chatHistory.push({ role: 'assistant', content: respuestaIA });
+
+    const audioIA = await axios.post(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
+      {
+        text: respuestaIA,
+        voice_settings: {
+          stability: 0.7,
+          similarity_boost: 0.7,
+        },
+      },
+      {
+        headers: {
+          'xi-api-key': elevenKey,
+          'Content-Type': 'application/json',
+        },
+        responseType: 'arraybuffer',
+      }
+    );
+
+    fs.writeFileSync(path.join(__dirname, 'public', 'respuesta.mp3'), audioIA.data);
+
     const twiml = `
       <Response>
         <Play>/respuesta.mp3</Play>
@@ -94,14 +126,10 @@ app.post('/respuesta', async (req, res) => {
     `;
     res.type('text/xml');
     res.send(twiml);
-  } catch (err) {
-    console.error('ERROR:', err.message);
+  } catch (error) {
+    console.error('ERROR:', error.message);
     res.type('text/xml');
-    res.send(`
-      <Response>
-        <Say language="es-ES">Ha ocurrido un error. Hasta luego.</Say>
-      </Response>
-    `);
+    res.send(`<Response><Say>Ha ocurrido un error. Adiós.</Say></Response>`);
   }
 });
 
