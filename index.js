@@ -13,7 +13,7 @@ app.use(express.static('public'));
 app.post('/voice', (req, res) => {
   const twiml = `
     <Response>
-      <Play>https://${req.headers.host}/Intro.mp3</Play>
+      <Play>https://${req.headers.host}/respuesta.mp3</Play>
       <Gather input="speech" action="/response" method="POST" language="es-ES" timeout="5">
         <Say voice="woman" language="es-ES">Hola. ¿En qué puedo ayudarte?</Say>
       </Gather>
