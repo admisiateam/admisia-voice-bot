@@ -10,34 +10,17 @@ const port = process.env.PORT || 3000;
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static('public'));
 
-let chatHistory = []; // Historial de conversación
+const voiceId = 'UOIqAnmS11Reiei1Ytkc'; // Laura
 
-// INICIO DE LLAMADA
+// Ruta de inicio: genera saludo y escucha al usuario
 app.post('/voice', async (req, res) => {
-  // Resetear historial en cada llamada
-  chatHistory = [
-    {
-      role: 'system',
-      content:
-        'Eres Laura, asesora académica de la Universidad Francisco de Vitoria. Responde de forma natural, fluida y profesional. Evita frases robóticas como "Estoy aquí para ayudarte" o "¿En qué puedo ayudarte?" tras cada respuesta. Saluda siempre al principio diciendo "Hola, soy Laura, asesora académica de la Universidad Francisco de Vitoria. ¿En qué puedo ayudarte?".',
-    },
-    {
-      role: 'assistant',
-      content:
-        'Hola, soy Laura, asesora académica de la Universidad Francisco de Vitoria. ¿En qué puedo ayudarte?',
-    },
-  ];
+  const saludo = 'Hola, soy Laura, asesora académica de la Universidad Francisco de Vitoria. ¿En qué puedo ayudarte?';
 
-  const openaiKey = process.env.OPENAI_API_KEY;
-  const elevenKey = process.env.ELEVENLABS_API_KEY;
-  const voiceId = 'UOIqAnmS11Reiei1Ytkc'; // Laura
-
-  // Generar audio de saludo de bienvenida
   try {
     const bienvenidaAudio = await axios.post(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
       {
-        text: chatHistory[1].content,
+        text: saludo,
         voice_settings: {
           stability: 0.7,
           similarity_boost: 0.7,
@@ -45,7 +28,7 @@ app.post('/voice', async (req, res) => {
       },
       {
         headers: {
-          'xi-api-key': elevenKey,
+          'xi-api-key': process.env.ELEVENLABS_API_KEY,
           'Content-Type': 'application/json',
         },
         responseType: 'arraybuffer',
@@ -63,40 +46,43 @@ app.post('/voice', async (req, res) => {
     `;
     res.type('text/xml');
     res.send(twiml);
-  } catch (error) {
-    console.error('Error al generar bienvenida:', error.message);
+  } catch (err) {
+    console.error('Error en /voice:', err.message);
     res.type('text/xml');
-    res.send(`<Response><Say>Ha ocurrido un error. Adiós.</Say></Response>`);
+    res.send('<Response><Say>Ha ocurrido un error. Adiós.</Say></Response>');
   }
 });
 
-// RESPUESTA A LA VOZ DEL USUARIO
+// Ruta para procesar la respuesta del usuario
 app.post('/respuesta', async (req, res) => {
   const userInput = req.body.SpeechResult || 'No entendí';
-  const openaiKey = process.env.OPENAI_API_KEY;
-  const elevenKey = process.env.ELEVENLABS_API_KEY;
-  const voiceId = 'UOIqAnmS11Reiei1Ytkc';
-
-  chatHistory.push({ role: 'user', content: userInput });
 
   try {
-    // Llamada a GPT-4
     const completion = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
         model: 'gpt-4',
-        messages: chatHistory.slice(-6), // Últimos 6 mensajes (mantiene contexto sin lentitud)
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Eres Laura, asesora académica de la Universidad Francisco de Vitoria. Tu voz debe sonar cálida, cercana y profesional. No repitas frases como "Estoy aquí para ayudarte" o "¿En qué puedo ayudarte?". Responde de forma directa, útil y coherente, como una persona real. Evita sonar como un asistente artificial.',
+          },
+          {
+            role: 'user',
+            content: userInput,
+          },
+        ],
       },
       {
         headers: {
-          Authorization: `Bearer ${openaiKey}`,
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
           'Content-Type': 'application/json',
         },
       }
     );
 
     const respuestaIA = completion.data.choices[0].message.content;
-    chatHistory.push({ role: 'assistant', content: respuestaIA });
 
     const audioIA = await axios.post(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
@@ -109,7 +95,7 @@ app.post('/respuesta', async (req, res) => {
       },
       {
         headers: {
-          'xi-api-key': elevenKey,
+          'xi-api-key': process.env.ELEVENLABS_API_KEY,
           'Content-Type': 'application/json',
         },
         responseType: 'arraybuffer',
@@ -126,13 +112,13 @@ app.post('/respuesta', async (req, res) => {
     `;
     res.type('text/xml');
     res.send(twiml);
-  } catch (error) {
-    console.error('ERROR:', error.message);
+  } catch (err) {
+    console.error('Error en /respuesta:', err.message);
     res.type('text/xml');
-    res.send(`<Response><Say>Ha ocurrido un error. Adiós.</Say></Response>`);
+    res.send('<Response><Say>Ha ocurrido un error. Adiós.</Say></Response>');
   }
 });
 
 app.listen(port, () => {
-  console.log(`Servidor activo en http://localhost:${port}`);
+  console.log(`Servidor escuchando en http://localhost:${port}`);
 });
